@@ -9,7 +9,7 @@ class TradingStrategy(ABC):
         self.btc = initial_btc_usd / initial_usd  # Convert USD value to BTC amount
 
     @abstractmethod
-    def make_decision(self, price, date):
+    def make_decision(self, row):
         pass
 
     def execute_trade(self, decision, price, date):
@@ -24,96 +24,63 @@ class TradingStrategy(ABC):
         return self.usd + self.btc * price
 
 class SimpleMovingAverageStrategy(TradingStrategy):
-    def __init__(self, initial_usd, initial_btc_usd, short_window=10, long_window=50):
+    def __init__(self, initial_usd, initial_btc_usd):
         super().__init__(initial_usd, initial_btc_usd)
-        self.short_window = short_window
-        self.long_window = long_window
-        self.prices = []
 
-    def make_decision(self, price, date):
-        self.prices.append(price)
-        if len(self.prices) > self.long_window:
-            short_ma = sum(self.prices[-self.short_window:]) / self.short_window
-            long_ma = sum(self.prices[-self.long_window:]) / self.long_window
-            if short_ma > long_ma:
-                return 'buy'
-            elif short_ma < long_ma:
-                return 'sell'
+    def make_decision(self, row):
+        if row['SMA_short'] > row['SMA_long']:
+            return 'buy'
+        elif row['SMA_short'] < row['SMA_long']:
+            return 'sell'
         return 'hold'
 
 class RSIStrategy(TradingStrategy):
-    def __init__(self, initial_usd, initial_btc_usd, window=14, oversold=30, overbought=70):
+    def __init__(self, initial_usd, initial_btc_usd, oversold=30, overbought=70):
         super().__init__(initial_usd, initial_btc_usd)
-        self.window = window
         self.oversold = oversold
         self.overbought = overbought
-        self.prices = []
 
-    def make_decision(self, price, date):
-        self.prices.append(price)
-        if len(self.prices) > self.window:
-            gains = []
-            losses = []
-            for i in range(1, self.window + 1):
-                change = self.prices[-i] - self.prices[-i-1]
-                if change >= 0:
-                    gains.append(change)
-                    losses.append(0)
-                else:
-                    gains.append(0)
-                    losses.append(-change)
-            avg_gain = sum(gains) / self.window
-            avg_loss = sum(losses) / self.window
-            rs = avg_gain / avg_loss if avg_loss != 0 else 0
-            rsi = 100 - (100 / (1 + rs))
-            if rsi < self.oversold:
-                return 'buy'
-            elif rsi > self.overbought:
-                return 'sell'
+    def make_decision(self, row):
+        rsi = row['RSI']
+        if rsi < self.oversold:
+            return 'buy'
+        elif rsi > self.overbought:
+            return 'sell'
         return 'hold'
 
 class MACDStrategy(TradingStrategy):
-    def __init__(self, initial_usd, initial_btc_usd, fast_period=12, slow_period=26, signal_period=9):
+    def __init__(self, initial_usd, initial_btc_usd):
         super().__init__(initial_usd, initial_btc_usd)
-        self.fast_period = fast_period
-        self.slow_period = slow_period
-        self.signal_period = signal_period
-        self.prices = []
-        self.macd = []
-        self.signal_line = []
+        self.previous_macd = None
+        self.previous_signal = None
 
-    def make_decision(self, price, date):
-        self.prices.append(price)
-        if len(self.prices) > self.slow_period:
-            fast_ema = pd.Series(self.prices).ewm(span=self.fast_period, adjust=False).mean().iloc[-1]
-            slow_ema = pd.Series(self.prices).ewm(span=self.slow_period, adjust=False).mean().iloc[-1]
-            self.macd.append(fast_ema - slow_ema)
-            if len(self.macd) > self.signal_period:
-                self.signal_line.append(pd.Series(self.macd).ewm(span=self.signal_period, adjust=False).mean().iloc[-1])
-                if self.macd[-1] > self.signal_line[-1] and self.macd[-2] <= self.signal_line[-2]:
-                    return 'buy'
-                elif self.macd[-1] < self.signal_line[-1] and self.macd[-2] >= self.signal_line[-2]:
-                    return 'sell'
-        return 'hold'
+    def make_decision(self, row):
+        current_macd = row['MACD']
+        current_signal = row['Signal_Line']
+        
+        if self.previous_macd is not None and self.previous_signal is not None:
+            if current_macd > current_signal and self.previous_macd <= self.previous_signal:
+                decision = 'buy'
+            elif current_macd < current_signal and self.previous_macd >= self.previous_signal:
+                decision = 'sell'
+            else:
+                decision = 'hold'
+        else:
+            decision = 'hold'
+        
+        self.previous_macd = current_macd
+        self.previous_signal = current_signal
+        return decision
 
 class BollingerBandsStrategy(TradingStrategy):
-    def __init__(self, initial_usd, initial_btc_usd, window=20, num_std=2):
+    def __init__(self, initial_usd, initial_btc_usd):
         super().__init__(initial_usd, initial_btc_usd)
-        self.window = window
-        self.num_std = num_std
-        self.prices = []
 
-    def make_decision(self, price, date):
-        self.prices.append(price)
-        if len(self.prices) >= self.window:
-            rolling_mean = pd.Series(self.prices).rolling(window=self.window).mean().iloc[-1]
-            rolling_std = pd.Series(self.prices).rolling(window=self.window).std().iloc[-1]
-            upper_band = rolling_mean + (rolling_std * self.num_std)
-            lower_band = rolling_mean - (rolling_std * self.num_std)
-            if price < lower_band:
-                return 'buy'
-            elif price > upper_band:
-                return 'sell'
+    def make_decision(self, row):
+        if row['price'] < row['BB_lower']:
+            return 'buy'
+        elif row['price'] > row['BB_upper']:
+            return 'sell'
         return 'hold'
 
 class SentimentBasedStrategy(TradingStrategy):
@@ -121,12 +88,18 @@ class SentimentBasedStrategy(TradingStrategy):
         super().__init__(initial_usd, initial_btc_usd)
         self.sentiment_analyzer = SentimentAnalyzer()
 
-    def make_decision(self, price, date):
-        sentiment_index = self.sentiment_analyzer.get_fear_and_greed_index(date)
-        if sentiment_index < 20:  # Extreme fear
-            return 'buy'
-        elif sentiment_index > 80:  # Extreme greed
-            return 'sell'
+    def make_decision(self, row):
+        sentiment_index = self.sentiment_analyzer.get_fear_and_greed_index(row['date'])
+        if sentiment_index is None:
+            return 'hold'  # If we can't get sentiment data, we'll hold
+        try:
+            sentiment_index = int(sentiment_index)  # Ensure sentiment_index is an integer
+            if sentiment_index < 20:  # Extreme fear
+                return 'buy'
+            elif sentiment_index > 80:  # Extreme greed
+                return 'sell'
+        except ValueError:
+            print(f"Invalid sentiment index value: {sentiment_index}")
         return 'hold'
 
 # You can add more strategy classes here

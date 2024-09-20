@@ -1,8 +1,10 @@
 import sys
 import os
 import pandas as pd
+import numpy as np
 from datetime import datetime
 import streamlit as st
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from .sentiment_analyzer import SentimentAnalyzer
 from .trading_logic import SimpleMovingAverageStrategy, RSIStrategy, MACDStrategy, BollingerBandsStrategy, SentimentBasedStrategy
 
@@ -40,34 +42,51 @@ def fetch_historical_data():
         st.error(f"Error fetching historical data: {str(e)}")
         return None
 
-@st.cache_data(ttl=3600)  # Cache for 1 hour
+def precompute_indicators(df):
+    # Precompute common indicators
+    df['SMA_short'] = df['price'].rolling(window=10).mean()
+    df['SMA_long'] = df['price'].rolling(window=50).mean()
+    df['RSI'] = compute_rsi(df['price'], window=14)
+    df['MACD'], df['Signal_Line'] = compute_macd(df['price'])
+    df['BB_upper'], df['BB_lower'] = compute_bollinger_bands(df['price'])
+    return df
+
+def compute_rsi(prices, window=14):
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+
+def compute_macd(prices, fast_period=12, slow_period=26, signal_period=9):
+    fast_ema = prices.ewm(span=fast_period, adjust=False).mean()
+    slow_ema = prices.ewm(span=slow_period, adjust=False).mean()
+    macd = fast_ema - slow_ema
+    signal_line = macd.ewm(span=signal_period, adjust=False).mean()
+    return macd, signal_line
+
+def compute_bollinger_bands(prices, window=20, num_std=2):
+    rolling_mean = prices.rolling(window=window).mean()
+    rolling_std = prices.rolling(window=window).std()
+    upper_band = rolling_mean + (rolling_std * num_std)
+    lower_band = rolling_mean - (rolling_std * num_std)
+    return upper_band, lower_band
+
 def analyze_strategy(df, strategy_class, **strategy_params):
-    sentiment_analyzer = SentimentAnalyzer()
-    initial_total = 100
-    strategy = strategy_class(initial_usd=initial_total/2, initial_btc_usd=initial_total/2, **strategy_params)
-    
+    strategy = strategy_class(initial_usd=50, initial_btc_usd=50, **strategy_params)
     decisions = []
     portfolio_values = []
-    sentiments = []
-    
+
     for _, row in df.iterrows():
-        decision = strategy.make_decision(row['price'], row['date'])
+        decision = strategy.make_decision(row)
         portfolio_value = strategy.execute_trade(decision, row['price'], row['date'])
-        sentiment_index = sentiment_analyzer.get_fear_and_greed_index(row['date'])
-        sentiment = sentiment_analyzer.interpret_sentiment(sentiment_index)
         decisions.append(decision)
         portfolio_values.append(portfolio_value)
-        sentiments.append(sentiment)
-    
+
     df = df.copy()
     df['decision'] = decisions
     df['portfolio_value'] = portfolio_values
-    df['sentiment'] = sentiments
-    
-    # Normalize the price and portfolio value
-    initial_price = df['price'].iloc[0]
-    df['normalized_price'] = df['price'] / initial_price * 100
-    df['normalized_portfolio'] = df['portfolio_value'] / initial_total * 100
+    df['normalized_portfolio'] = df['portfolio_value'] / 100 * 100  # Normalize to percentage
 
     return df
 
@@ -75,32 +94,44 @@ def analyze_strategy(df, strategy_class, **strategy_params):
 def get_data_for_dashboard(selected_strategies):
     df = fetch_historical_data()
     if df is not None:
+        df = precompute_indicators(df)
         strategies = {
-            'Simple Moving Average': (SimpleMovingAverageStrategy, {'short_window': 10, 'long_window': 50}),
-            'RSI': (RSIStrategy, {'window': 14, 'oversold': 30, 'overbought': 70}),
-            'MACD': (MACDStrategy, {'fast_period': 12, 'slow_period': 26, 'signal_period': 9}),
-            'Bollinger Bands': (BollingerBandsStrategy, {'window': 20, 'num_std': 2}),
+            'Simple Moving Average': (SimpleMovingAverageStrategy, {}),
+            'RSI': (RSIStrategy, {}),
+            'MACD': (MACDStrategy, {}),
+            'Bollinger Bands': (BollingerBandsStrategy, {}),
             'Sentiment Based': (SentimentBasedStrategy, {}),
         }
         
         results = {}
-        for strategy_name in selected_strategies:
-            strategy_class, strategy_params = strategies[strategy_name]
-            strategy_df = analyze_strategy(df, strategy_class, **strategy_params)
-            results[strategy_name] = strategy_df.rename(columns={
-                'date': 'Date',
-                'price': 'Close',
-                'normalized_price': 'NormalizedPrice',
-                'normalized_portfolio': f'NormalizedPortfolio_{strategy_name}',
-                'decision': f'Signal_{strategy_name}',
-                'sentiment': 'Sentiment'
-            })
+        
+        with ProcessPoolExecutor() as executor:
+            future_to_strategy = {executor.submit(analyze_strategy, df, strategy_class, **strategy_params): strategy_name 
+                                  for strategy_name, (strategy_class, strategy_params) in strategies.items() 
+                                  if strategy_name in selected_strategies}
+            
+            for future in as_completed(future_to_strategy):
+                strategy_name = future_to_strategy[future]
+                try:
+                    strategy_df = future.result()
+                    results[strategy_name] = strategy_df.rename(columns={
+                        'date': 'Date',
+                        'price': 'Close',
+                        'normalized_price': 'NormalizedPrice',
+                        'normalized_portfolio': f'NormalizedPortfolio_{strategy_name}',
+                        'decision': f'Signal_{strategy_name}',
+                    })
+                except Exception as exc:
+                    st.error(f'{strategy_name} generated an exception: {exc}')
         
         # Add Bitcoin price data
+        initial_price = df['price'].iloc[0]
+        df['normalized_price'] = df['price'] / initial_price * 100
         results['Bitcoin'] = df.rename(columns={
             'date': 'Date',
             'price': 'Close',
-            'normalized_price': 'NormalizedPrice'
+            'normalized_price': 'NormalizedPrice',
+            'volume': 'Volume'
         })
         
         return results

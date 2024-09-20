@@ -4,50 +4,36 @@ from datetime import datetime, timedelta
 class SentimentAnalyzer:
     def __init__(self):
         self.base_url = "https://api.alternative.me/fng/"
-        self.sentiment_data = self.load_yearly_sentiment()
-
-    def load_yearly_sentiment(self):
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=365)
-        params = {
-            'limit': 365,
-            'date_format': 'us',
-            'format': 'json'
-        }
-        try:
-            response = requests.get(self.base_url, params=params)
-            data = response.json()
-            sentiment_data = {}
-            for item in data['data']:
-                try:
-                    # Try multiple date formats
-                    date = self.parse_date(item['timestamp'])
-                    sentiment_data[date] = int(item['value'])
-                except ValueError:
-                    print(f"Warning: Unable to parse date {item['timestamp']}")
-            return sentiment_data
-        except Exception as e:
-            print(f"Error fetching Fear and Greed Index: {str(e)}")
-            return {}
-
-    def parse_date(self, date_string):
-        date_formats = ['%d-%m-%Y', '%m-%d-%Y', '%Y-%m-%d']
-        for date_format in date_formats:
-            try:
-                return datetime.strptime(date_string, date_format).date()
-            except ValueError:
-                continue
-        raise ValueError(f"Unable to parse date: {date_string}")
+        self.cache = {}
 
     def get_fear_and_greed_index(self, date):
-        return self.sentiment_data.get(date.date(), None)
+        if date in self.cache:
+            return self.cache[date]
 
-    def interpret_sentiment(self, index):
-        if index is None:
+        try:
+            response = requests.get(f"{self.base_url}?date={date.strftime('%d-%m-%Y')}")
+            data = response.json()
+            if data['data']:
+                sentiment_value = int(data['data'][0]['value'])
+                self.cache[date] = sentiment_value
+                return sentiment_value
+            else:
+                print(f"No sentiment data available for {date}")
+                return None
+        except Exception as e:
+            print(f"Error fetching sentiment data for {date}: {str(e)}")
+            return None
+
+    def interpret_sentiment(self, sentiment_index):
+        if sentiment_index is None:
             return "Unknown"
-        elif index <= 60:
+        elif sentiment_index <= 20:
+            return "Extreme Fear"
+        elif sentiment_index <= 40:
             return "Fear"
-        elif index >= 70:
+        elif sentiment_index <= 60:
+            return "Neutral"
+        elif sentiment_index <= 80:
             return "Greed"
         else:
-            return "Neutral"
+            return "Extreme Greed"
