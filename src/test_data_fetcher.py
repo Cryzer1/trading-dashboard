@@ -2,6 +2,7 @@ import sys
 import os
 import pandas as pd
 from datetime import datetime
+import streamlit as st
 from sentiment_analyzer import SentimentAnalyzer
 
 # Add the project root directory to the Python path
@@ -12,6 +13,7 @@ from crypto_data_fetcher import CryptoDataFetcher
 from trading_logic import TradingLogic
 from config import config
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def fetch_and_analyze_data():
     fetcher = CryptoDataFetcher()
     sentiment_analyzer = SentimentAnalyzer()
@@ -23,7 +25,7 @@ def fetch_and_analyze_data():
         )
         
         if not historical_data:
-            print("Error: No historical data returned.")
+            st.warning("Error: No historical data returned.")
             return None
         
         # Convert the list of dictionaries to a DataFrame
@@ -38,21 +40,18 @@ def fetch_and_analyze_data():
         strategy = TradingLogic(initial_usd=initial_total/2, initial_btc_usd=initial_total/2)
         
         # Run the backtest
-        decisions = []
-        portfolio_values = []
-        sentiments = []
-        for _, row in df.iterrows():
+        df['decision'] = ''
+        df['portfolio_value'] = 0.0
+        df['sentiment'] = ''
+        
+        for i, row in df.iterrows():
             decision = strategy.make_decision(row['price'], row['date'])
             portfolio_value = strategy.execute_trade(decision, row['price'], row['date'])
             sentiment_index = sentiment_analyzer.get_fear_and_greed_index(row['date'])
             sentiment = sentiment_analyzer.interpret_sentiment(sentiment_index)
-            decisions.append(decision)
-            portfolio_values.append(portfolio_value)
-            sentiments.append(sentiment)
-        
-        df['decision'] = decisions
-        df['portfolio_value'] = portfolio_values
-        df['sentiment'] = sentiments
+            df.at[i, 'decision'] = decision
+            df.at[i, 'portfolio_value'] = portfolio_value
+            df.at[i, 'sentiment'] = sentiment
         
         # Normalize the price and portfolio value
         initial_price = df['price'].iloc[0]
@@ -62,9 +61,10 @@ def fetch_and_analyze_data():
         return df
 
     except Exception as e:
-        print(f"Error fetching and analyzing data: {str(e)}")
+        st.error(f"Error fetching and analyzing data: {str(e)}")
         return None
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour
 def get_data_for_dashboard():
     df = fetch_and_analyze_data()
     if df is not None:

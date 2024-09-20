@@ -1,79 +1,73 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import numpy as np
-from datetime import datetime, timedelta
-import sys
-import os
-
-# Add the src directory to the Python path
-sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 # Import data fetching module
 from src.test_data_fetcher import get_data_for_dashboard
 
-# Plotting function
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def load_data():
+    return get_data_for_dashboard()
+
 def plot_strategy(data):
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=data['Date'], y=data['NormalizedPrice'], mode='lines', name='Bitcoin Price (Normalized)'))
-    fig.add_trace(go.Scatter(x=data['Date'], y=data['NormalizedPortfolio'], mode='lines', name='Portfolio Value (Normalized)'))
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
     
-    # Add buy and sell signals
+    fig.add_trace(go.Scatter(x=data['Date'], y=data['NormalizedPrice'], mode='lines', name='Bitcoin Price'), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data['Date'], y=data['NormalizedPortfolio'], mode='lines', name='Portfolio Value'), row=1, col=1)
+    
     buy_signals = data[data['Signal'] == 'buy']
     sell_signals = data[data['Signal'] == 'sell']
-    fig.add_trace(go.Scatter(x=buy_signals['Date'], y=buy_signals['NormalizedPrice'], mode='markers', name='Buy (Fear)', marker=dict(symbol='triangle-up', size=10, color='green')))
-    fig.add_trace(go.Scatter(x=sell_signals['Date'], y=sell_signals['NormalizedPrice'], mode='markers', name='Sell (Greed)', marker=dict(symbol='triangle-down', size=10, color='red')))
+    fig.add_trace(go.Scatter(x=buy_signals['Date'], y=buy_signals['NormalizedPrice'], mode='markers', name='Buy', marker=dict(symbol='triangle-up', size=10, color='green')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=sell_signals['Date'], y=sell_signals['NormalizedPrice'], mode='markers', name='Sell', marker=dict(symbol='triangle-down', size=10, color='red')), row=1, col=1)
     
-    fig.update_layout(
-        title='Bitcoin Price vs Portfolio Value (Normalized)',
-        xaxis_title='Date',
-        yaxis_title='Normalized Value (%)',
-        yaxis=dict(tickformat='.0f')
-    )
+    fig.add_trace(go.Bar(x=data['Date'], y=data['Volume'], name='Volume'), row=2, col=1)
+    
+    fig.update_layout(height=800, title='Bitcoin Price vs Portfolio Value (Normalized)', showlegend=True)
+    fig.update_xaxes(title_text='Date', row=2, col=1)
+    fig.update_yaxes(title_text='Normalized Value (%)', row=1, col=1)
+    fig.update_yaxes(title_text='Volume', row=2, col=1)
+    
     return fig
 
-# Main Streamlit app
 def main():
+    st.set_page_config(page_title="Trading Bot Strategy Dashboard", layout="wide")
     st.title("Trading Bot Strategy Dashboard")
 
-    # Fetch real-world data
-    data = get_data_for_dashboard()
+    data = load_data()
 
     if not data.empty:
-        # Display strategy performance plot
-        st.plotly_chart(plot_strategy(data))
-
-        # Display raw data
-        st.subheader("Raw Data")
-        st.dataframe(data)
-
-        # Additional metrics
-        st.subheader("Strategy Metrics")
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns([3, 1])
         
-        initial_value = 100  # Starting value is $100 USD total
-        final_bitcoin_value = initial_value * (data['Close'].iloc[-1] / data['Close'].iloc[0])
-        final_portfolio_value = data['NormalizedPortfolio'].iloc[-1]
+        with col1:
+            st.plotly_chart(plot_strategy(data), use_container_width=True)
         
-        bitcoin_return = (final_bitcoin_value - initial_value) / initial_value * 100
-        portfolio_return = (final_portfolio_value - initial_value) / initial_value * 100
-        
-        col1.metric("Bitcoin-only Return", f"{bitcoin_return:.2f}%")
-        col2.metric("Portfolio Return", f"{portfolio_return:.2f}%")
-        
-        # Calculate Sharpe Ratio (assuming risk-free rate of 0 for simplicity)
-        returns = data['NormalizedPortfolio'].pct_change().dropna()
-        sharpe_ratio = np.sqrt(252) * returns.mean() / returns.std()
-        col3.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
+        with col2:
+            st.subheader("Strategy Metrics")
+            initial_value = 100
+            final_bitcoin_value = initial_value * (data['Close'].iloc[-1] / data['Close'].iloc[0])
+            final_portfolio_value = data['NormalizedPortfolio'].iloc[-1]
+            
+            bitcoin_return = (final_bitcoin_value - initial_value) / initial_value * 100
+            portfolio_return = (final_portfolio_value - initial_value) / initial_value * 100
+            
+            st.metric("Bitcoin-only Return", f"{bitcoin_return:.2f}%")
+            st.metric("Portfolio Return", f"{portfolio_return:.2f}%")
+            
+            returns = data['NormalizedPortfolio'].pct_change().dropna()
+            sharpe_ratio = np.sqrt(252) * returns.mean() / returns.std()
+            st.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
 
-        # Display trade counts
-        st.subheader("Trade Summary")
-        buy_count = (data['Signal'] == 'buy').sum()
-        sell_count = (data['Signal'] == 'sell').sum()
-        st.write(f"Total trades: {buy_count + sell_count}")
-        st.write(f"Buy signals (Fear): {buy_count}")
-        st.write(f"Sell signals (Greed): {sell_count}")
+            st.subheader("Trade Summary")
+            buy_count = (data['Signal'] == 'buy').sum()
+            sell_count = (data['Signal'] == 'sell').sum()
+            st.write(f"Total trades: {buy_count + sell_count}")
+            st.write(f"Buy signals: {buy_count}")
+            st.write(f"Sell signals: {sell_count}")
 
+        with st.expander("Show Raw Data"):
+            st.dataframe(data)
     else:
         st.error("Failed to fetch and analyze data. Please check the logs for more information.")
 
