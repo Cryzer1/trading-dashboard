@@ -9,10 +9,16 @@ from src.test_data_fetcher import get_data_for_dashboard
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
 def load_data():
-    return get_data_for_dashboard()
+    data = get_data_for_dashboard()
+    print("Columns in the data:", data.columns)
+    print("Data types:", data.dtypes)
+    print("First few rows:", data.head())
+    return data
 
 def plot_strategy(data):
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
+    has_volume = 'Volume' in data.columns
+    fig = make_subplots(rows=2 if has_volume else 1, cols=1, shared_xaxes=True, 
+                        vertical_spacing=0.1, row_heights=[0.7, 0.3] if has_volume else [1])
     
     fig.add_trace(go.Scatter(x=data['Date'], y=data['NormalizedPrice'], mode='lines', name='Bitcoin Price'), row=1, col=1)
     fig.add_trace(go.Scatter(x=data['Date'], y=data['NormalizedPortfolio'], mode='lines', name='Portfolio Value'), row=1, col=1)
@@ -22,12 +28,13 @@ def plot_strategy(data):
     fig.add_trace(go.Scatter(x=buy_signals['Date'], y=buy_signals['NormalizedPrice'], mode='markers', name='Buy', marker=dict(symbol='triangle-up', size=10, color='green')), row=1, col=1)
     fig.add_trace(go.Scatter(x=sell_signals['Date'], y=sell_signals['NormalizedPrice'], mode='markers', name='Sell', marker=dict(symbol='triangle-down', size=10, color='red')), row=1, col=1)
     
-    fig.add_trace(go.Bar(x=data['Date'], y=data['Volume'], name='Volume'), row=2, col=1)
+    if has_volume:
+        fig.add_trace(go.Bar(x=data['Date'], y=data['Volume'], name='Volume'), row=2, col=1)
+        fig.update_yaxes(title_text='Volume', row=2, col=1)
     
-    fig.update_layout(height=800, title='Bitcoin Price vs Portfolio Value (Normalized)', showlegend=True)
-    fig.update_xaxes(title_text='Date', row=2, col=1)
+    fig.update_layout(height=800 if has_volume else 600, title='Bitcoin Price vs Portfolio Value (Normalized)', showlegend=True)
+    fig.update_xaxes(title_text='Date', row=2 if has_volume else 1, col=1)
     fig.update_yaxes(title_text='Normalized Value (%)', row=1, col=1)
-    fig.update_yaxes(title_text='Volume', row=2, col=1)
     
     return fig
 
@@ -36,6 +43,11 @@ def main():
     st.title("Trading Bot Strategy Dashboard")
 
     data = load_data()
+
+    required_columns = ['Date', 'NormalizedPrice', 'NormalizedPortfolio', 'Signal', 'Close']
+    if not all(col in data.columns for col in required_columns):
+        st.error(f"Missing required columns. Expected: {required_columns}, Got: {data.columns}")
+        return
 
     if not data.empty:
         col1, col2 = st.columns([3, 1])

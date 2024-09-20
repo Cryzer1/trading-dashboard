@@ -3,14 +3,14 @@ import os
 import pandas as pd
 from datetime import datetime
 import streamlit as st
-from sentiment_analyzer import SentimentAnalyzer
+from .sentiment_analyzer import SentimentAnalyzer
 
 # Add the project root directory to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
-from crypto_data_fetcher import CryptoDataFetcher
-from trading_logic import TradingLogic
+from .crypto_data_fetcher import CryptoDataFetcher
+from .trading_logic import TradingLogic
 from config import config
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour

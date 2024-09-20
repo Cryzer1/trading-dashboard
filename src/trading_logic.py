@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from sentiment_analyzer import SentimentAnalyzer
+from .sentiment_analyzer import SentimentAnalyzer
 
 class TradingLogic:
     def __init__(self, initial_usd=50, initial_btc_usd=50):
