@@ -72,4 +72,61 @@ class RSIStrategy(TradingStrategy):
                 return 'sell'
         return 'hold'
 
+class MACDStrategy(TradingStrategy):
+    def __init__(self, initial_usd, initial_btc_usd, fast_period=12, slow_period=26, signal_period=9):
+        super().__init__(initial_usd, initial_btc_usd)
+        self.fast_period = fast_period
+        self.slow_period = slow_period
+        self.signal_period = signal_period
+        self.prices = []
+        self.macd = []
+        self.signal_line = []
+
+    def make_decision(self, price, date):
+        self.prices.append(price)
+        if len(self.prices) > self.slow_period:
+            fast_ema = pd.Series(self.prices).ewm(span=self.fast_period, adjust=False).mean().iloc[-1]
+            slow_ema = pd.Series(self.prices).ewm(span=self.slow_period, adjust=False).mean().iloc[-1]
+            self.macd.append(fast_ema - slow_ema)
+            if len(self.macd) > self.signal_period:
+                self.signal_line.append(pd.Series(self.macd).ewm(span=self.signal_period, adjust=False).mean().iloc[-1])
+                if self.macd[-1] > self.signal_line[-1] and self.macd[-2] <= self.signal_line[-2]:
+                    return 'buy'
+                elif self.macd[-1] < self.signal_line[-1] and self.macd[-2] >= self.signal_line[-2]:
+                    return 'sell'
+        return 'hold'
+
+class BollingerBandsStrategy(TradingStrategy):
+    def __init__(self, initial_usd, initial_btc_usd, window=20, num_std=2):
+        super().__init__(initial_usd, initial_btc_usd)
+        self.window = window
+        self.num_std = num_std
+        self.prices = []
+
+    def make_decision(self, price, date):
+        self.prices.append(price)
+        if len(self.prices) >= self.window:
+            rolling_mean = pd.Series(self.prices).rolling(window=self.window).mean().iloc[-1]
+            rolling_std = pd.Series(self.prices).rolling(window=self.window).std().iloc[-1]
+            upper_band = rolling_mean + (rolling_std * self.num_std)
+            lower_band = rolling_mean - (rolling_std * self.num_std)
+            if price < lower_band:
+                return 'buy'
+            elif price > upper_band:
+                return 'sell'
+        return 'hold'
+
+class SentimentBasedStrategy(TradingStrategy):
+    def __init__(self, initial_usd, initial_btc_usd):
+        super().__init__(initial_usd, initial_btc_usd)
+        self.sentiment_analyzer = SentimentAnalyzer()
+
+    def make_decision(self, price, date):
+        sentiment_index = self.sentiment_analyzer.get_fear_and_greed_index(date)
+        if sentiment_index < 20:  # Extreme fear
+            return 'buy'
+        elif sentiment_index > 80:  # Extreme greed
+            return 'sell'
+        return 'hold'
+
 # You can add more strategy classes here

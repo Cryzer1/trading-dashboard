@@ -4,7 +4,7 @@ import pandas as pd
 from datetime import datetime
 import streamlit as st
 from .sentiment_analyzer import SentimentAnalyzer
-from .trading_logic import SimpleMovingAverageStrategy, RSIStrategy
+from .trading_logic import SimpleMovingAverageStrategy, RSIStrategy, MACDStrategy, BollingerBandsStrategy, SentimentBasedStrategy
 
 # Add the project root directory to the Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -78,7 +78,9 @@ def get_data_for_dashboard(selected_strategies):
         strategies = {
             'Simple Moving Average': (SimpleMovingAverageStrategy, {'short_window': 10, 'long_window': 50}),
             'RSI': (RSIStrategy, {'window': 14, 'oversold': 30, 'overbought': 70}),
-            # Add more strategies here
+            'MACD': (MACDStrategy, {'fast_period': 12, 'slow_period': 26, 'signal_period': 9}),
+            'Bollinger Bands': (BollingerBandsStrategy, {'window': 20, 'num_std': 2}),
+            'Sentiment Based': (SentimentBasedStrategy, {}),
         }
         
         results = {}
@@ -93,6 +95,13 @@ def get_data_for_dashboard(selected_strategies):
                 'decision': f'Signal_{strategy_name}',
                 'sentiment': 'Sentiment'
             })
+        
+        # Add Bitcoin price data
+        results['Bitcoin'] = df.rename(columns={
+            'date': 'Date',
+            'price': 'Close',
+            'normalized_price': 'NormalizedPrice'
+        })
         
         return results
     else:

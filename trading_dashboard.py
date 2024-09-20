@@ -16,24 +16,26 @@ def load_data(selected_strategies):
         print(f"First few rows for {strategy}:", df.head())
     return data
 
-def plot_strategies(data):
+def plot_strategies(data, show_bitcoin_price):
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.1, row_heights=[0.7, 0.3])
     
-    colors = ['blue', 'red', 'green', 'purple', 'orange']  # Add more colors if needed
+    colors = ['blue', 'red', 'green', 'purple', 'orange', 'cyan', 'magenta']  # Add more colors if needed
     
     for i, (strategy_name, df) in enumerate(data.items()):
-        color = colors[i % len(colors)]
-        fig.add_trace(go.Scatter(x=df['Date'], y=df[f'NormalizedPortfolio_{strategy_name}'], mode='lines', name=f'{strategy_name} Portfolio', line=dict(color=color)), row=1, col=1)
-        
-        buy_signals = df[df[f'Signal_{strategy_name}'] == 'buy']
-        sell_signals = df[df[f'Signal_{strategy_name}'] == 'sell']
-        fig.add_trace(go.Scatter(x=buy_signals['Date'], y=buy_signals['NormalizedPrice'], mode='markers', name=f'{strategy_name} Buy', marker=dict(symbol='triangle-up', size=10, color=color)), row=1, col=1)
-        fig.add_trace(go.Scatter(x=sell_signals['Date'], y=sell_signals['NormalizedPrice'], mode='markers', name=f'{strategy_name} Sell', marker=dict(symbol='triangle-down', size=10, color=color)), row=1, col=1)
+        if strategy_name != 'Bitcoin':
+            color = colors[i % len(colors)]
+            fig.add_trace(go.Scatter(x=df['Date'], y=df[f'NormalizedPortfolio_{strategy_name}'], mode='lines', name=f'{strategy_name} Portfolio', line=dict(color=color)), row=1, col=1)
+            
+            buy_signals = df[df[f'Signal_{strategy_name}'] == 'buy']
+            sell_signals = df[df[f'Signal_{strategy_name}'] == 'sell']
+            fig.add_trace(go.Scatter(x=buy_signals['Date'], y=buy_signals['NormalizedPrice'], mode='markers', name=f'{strategy_name} Buy', marker=dict(symbol='triangle-up', size=10, color=color)), row=1, col=1)
+            fig.add_trace(go.Scatter(x=sell_signals['Date'], y=sell_signals['NormalizedPrice'], mode='markers', name=f'{strategy_name} Sell', marker=dict(symbol='triangle-down', size=10, color=color)), row=1, col=1)
     
-    fig.add_trace(go.Scatter(x=df['Date'], y=df['NormalizedPrice'], mode='lines', name='Bitcoin Price', line=dict(color='black')), row=1, col=1)
+    if show_bitcoin_price:
+        fig.add_trace(go.Scatter(x=data['Bitcoin']['Date'], y=data['Bitcoin']['NormalizedPrice'], mode='lines', name='Bitcoin Price', line=dict(color='black', dash='dash')), row=1, col=1)
     
-    if 'Volume' in df.columns:
-        fig.add_trace(go.Bar(x=df['Date'], y=df['Volume'], name='Volume'), row=2, col=1)
+    if 'Volume' in data['Bitcoin'].columns:
+        fig.add_trace(go.Bar(x=data['Bitcoin']['Date'], y=data['Bitcoin']['Volume'], name='Volume'), row=2, col=1)
         fig.update_yaxes(title_text='Volume', row=2, col=1)
     
     fig.update_layout(height=800, title='Strategy Comparison', showlegend=True)
@@ -69,30 +71,34 @@ def main():
     st.set_page_config(page_title="Trading Bot Strategy Dashboard", layout="wide")
     st.title("Trading Bot Strategy Comparison Dashboard")
 
-    available_strategies = ['Simple Moving Average', 'RSI']  # Add more strategies here
+    available_strategies = ['Simple Moving Average', 'RSI', 'MACD', 'Bollinger Bands', 'Sentiment Based']
     selected_strategies = st.multiselect("Select strategies to compare", available_strategies, default=['Simple Moving Average'])
+
+    show_bitcoin_price = st.checkbox("Show Bitcoin Price", value=True)
 
     if not selected_strategies:
         st.warning("Please select at least one strategy to display.")
         return
 
-    data = load_data(selected_strategies)
+    data = load_data(selected_strategies + ['Bitcoin'])
 
     if data:
-        st.plotly_chart(plot_strategies(data), use_container_width=True)
+        st.plotly_chart(plot_strategies(data, show_bitcoin_price), use_container_width=True)
 
         col1, col2 = st.columns(2)
         for i, (strategy_name, df) in enumerate(data.items()):
-            with col1 if i % 2 == 0 else col2:
-                st.subheader(f"{strategy_name} Metrics")
-                metrics = calculate_metrics(df, strategy_name)
-                for metric, value in metrics.items():
-                    st.metric(metric, value)
+            if strategy_name != 'Bitcoin':
+                with col1 if i % 2 == 0 else col2:
+                    st.subheader(f"{strategy_name} Metrics")
+                    metrics = calculate_metrics(df, strategy_name)
+                    for metric, value in metrics.items():
+                        st.metric(metric, value)
 
         with st.expander("Show Raw Data"):
             for strategy_name, df in data.items():
-                st.subheader(f"{strategy_name} Data")
-                st.dataframe(df)
+                if strategy_name != 'Bitcoin':
+                    st.subheader(f"{strategy_name} Data")
+                    st.dataframe(df)
     else:
         st.error("Failed to fetch and analyze data. Please check the logs for more information.")
 
